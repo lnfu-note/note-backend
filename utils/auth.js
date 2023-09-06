@@ -1,5 +1,11 @@
 const jwt = require('jsonwebtoken');
 const secretKey = 'YangMing,whichfocusedonbiomedicalresearch,andChiaoTung,whichfocusedonelectroniccommunicationresearch,werebothtop-tieruniversitiesinTaiwan'
+const expiresTime = 1000 * 60 * 30; // 30 min
+
+exports.generateToken = (id, name) => {
+    const token = jwt.sign({ id: id, name: name }, secretKey, { expiresIn: expiresTime });
+    return token;
+}
 
 exports.authenticateToken = (req, res, next) => {
     const token = req.headers.authorization;

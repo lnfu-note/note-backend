@@ -2,33 +2,33 @@ const db = require('../db');
 
 // 列出使用者的所有筆記 GET /api/v1/notes
 exports.notesGET = async function (req, res) {
-    const userInfo = req.user;
-    const userId = userInfo.id;
-    const dbQuery = "SELECT * FROM note WHERE account_id=$1;";
+    const userId = req.user.id;
+    const dbQuery = "SELECT id, title, created_at, last_modified_at FROM note WHERE account_id=$1";
     const dbParams = [userId];
     const dbResult = await db.query(dbQuery, dbParams);
-    const result = dbResult.rows.map(({ id, title, created_at, last_modified_at }) => ({ id, title, created_at, last_modified_at }));
-    res.send(result);
+    const data = dbResult.rows;
+    return res.send({
+        result: "Success",
+        data: data
+    });
 }
 
 exports.notesPOST = async function (req, res) {
-    const userInfo = req.user;
-    const userId = userInfo.id;
+    const userId = req.user.id;
     const title = req.body.title;
     const body = req.body.body;
     if (!title || typeof (title) !== 'string' || title === "") {
-        return res.send({ result: "Fail", message: "請輸入標題" });
+        return res.send({ result: "Fail", message: "標題不可為空" });
     }
     const dbQuery = "INSERT INTO note (title, body, account_id) VALUES ($1, $2, $3) RETURNING id;";
     const dbParams = [title, body, userId];
     const dbResult = await db.query(dbQuery, dbParams);
-    const result = dbResult.rows[0].id;
-    res.send({ result: "Success", message: "成功", data: { id: result } })
+    const { id } = dbResult.rows[0];
+    return res.send({ result: "Success", message: "成功", data: { id: id } });
 }
 
 exports.notesDELETE = async function (req, res) {
-    const userInfo = req.user;
-    const userId = userInfo.id;
+    const userId = req.user.id;
     const dbQuery1 = `
         DELETE FROM notetag
             WHERE note_id IN (
@@ -36,91 +36,92 @@ exports.notesDELETE = async function (req, res) {
                     WHERE account_id=$1
             );
         `;
-    const dbQuery2 = "DELETE FROM note WHERE account_id=$1;";
+    const dbQuery2 = "DELETE FROM note WHERE account_id=$1";
     const dbParams = [userId];
     try {
         await db.query(dbQuery1, dbParams);
         await db.query(dbQuery2, dbParams);
     }
-    finally { res.send({ result: "Success", message: "已刪除所有筆記" }) }
+    finally { return res.send({ result: "Success", message: "已刪除所有筆記" }); }
 }
-
-
-
 
 // 查看筆記 GET /api/v1/notes/:noteId
 exports.noteGET = async function (req, res) {
-    const userInfo = req.user;
-    const userId = userInfo.id;
-
+    const userId = req.user.id;
     const noteId = req.params.noteId;
-    const dbQuery1 = "SELECT * FROM note WHERE id=$1;"
+    const dbQuery1 = "SELECT title, body, account_id, created_at, last_modified_at FROM note WHERE id=$1";
     const dbParams1 = [noteId];
     const dbResult1 = await db.query(dbQuery1, dbParams1);
     if (dbResult1.rows.length === 0) {
         return res.send({ result: "Fail", message: "查無紀錄" });
     }
     else {
-        if (dbResult1.rows[0].account_id !== userId) {
+        const { title, body, account_id, created_at, last_modified_at } = dbResult1.rows[0];
+
+        if (account_id !== userId) {
             return res.send({ result: "Fail", message: "您並非筆記擁有者" });
         }
 
-        // tag
         const dbQuery2 = "SELECT id, name FROM tag WHERE id IN (SELECT tag_id FROM notetag WHERE note_id=$1);";
         const dbParams2 = [noteId];
         const dbResult2 = await db.query(dbQuery2, dbParams2);
-
-        const result = {
-            title: dbResult1.rows[0].title,
-            body: dbResult1.rows[0].body,
-            account_id: dbResult1.rows[0].account_id,
-            created_at: dbResult1.rows[0].created_at,
-            last_modified_at: dbResult1.rows[0].last_modified_at,
-            tags: dbResult2.rows
+        const tags = dbResult2.rows;
+        const data = {
+            title: title,
+            body: body,
+            account_id: account_id,
+            created_at: created_at,
+            last_modified_at: last_modified_at,
+            tags: tags
         }
-        res.send({
+        return res.send({
             result: "Success",
-            data: result
+            data: data
         });
     }
 }
 
 // 修改筆記 PUT /api/v1/notes/:noteId
 exports.notePUT = async function (req, res) {
+    const userId = req.user.id;
     const noteId = req.params.noteId;
     const title = req.body.title;
     const body = req.body.body;
-    if (!title || !body || typeof (title) !== 'string' || typeof (body) !== 'string') {
-        res.send("Please provide { title: string, body: string }");
+    if (!title || typeof (title) !== 'string' || title === "") {
+        return res.send({ result: "Fail", message: "標題不可為空" });
     }
-    const dbQuery = "UPDATE note SET title=$1, body=$2, last_modified_at=NOW() WHERE id=$3;";
-    const dbParams = [title, body, noteId];
+    const dbQuery = "UPDATE note SET title=$1, body=$2, last_modified_at=NOW() WHERE id=$3 AND account_id=$4";
+    const dbParams = [title, body, noteId, userId];
     try { await db.query(dbQuery, dbParams) }
-    finally { res.send("Success") }
+    finally {
+        return res.send({
+            result: "Success",
+            message: "已成功修改筆記"
+        });
+    }
 }
 
 // 刪除筆記 DELETE /api/v1/notes/:noteId
 exports.noteDELETE = async function (req, res) {
+    const userId = req.user.id;
     const noteId = req.params.noteId;
-    const dbQuery1 = "DELETE FROM notetag WHERE note_id=$1;";
-    const dbQuery2 = "DELETE FROM note WHERE id=$1;";
+    const dbQuery1 = "SELECT * FROM note WHERE id=$1 AND account_id=$2";
+    const dbParams1 = [noteId, userId];
+    const dbResult1 = await db.query(dbQuery1, dbParams1);
+    if (dbResult1.rows.length === 0) {
+        return res.send({
+            result: "Fail",
+            message: "查無筆記"
+        })
+    }
+    const dbQuery2 = "DELETE FROM notetag WHERE note_id=$1;";
+    const dbQuery3 = "DELETE FROM note WHERE id=$1;";
     const dbParams = [noteId];
     try {
-        await db.query(dbQuery1, dbParams)
         await db.query(dbQuery2, dbParams)
+        await db.query(dbQuery3, dbParams)
     }
-    finally { res.send("Success") }
-}
-
-// 查看筆記所有標籤 GET /api/v1/notes/:noteId/tags
-exports.noteTagIdsGET = async function (req, res) {
-    const noteId = req.params.noteId;
-    const dbQuery = "SELECT * FROM notetag WHERE note_id=$1;";
-    const dbParams = [noteId];
-    const dbResult = await db.query(dbQuery, dbParams);
-    const result = dbResult.rows;
-    console.log(result);
-    res.send("NOT IMPLEMENTED: note tag_ids GET");
+    finally { return res.send({ result: "Success", message: "已刪除" }); }
 }
 
 // 為筆記新增標籤 POST /api/v1/notes/:noteId/tags/:tagId
@@ -130,7 +131,7 @@ exports.notetagPOST = async function (req, res) {
     const dbQuery = "INSERT INTO notetag (note_id, tag_id) VALUES ($1, $2);";
     const dbParams = [noteId, tagId];
     try { await db.query(dbQuery, dbParams) }
-    finally { res.send({ result: "Success", message: "成功" }) }
+    finally { return res.send({ result: "Success", message: "成功" }); }
 }
 
 // 為筆記移除標籤 DELETE /api/v1/notes/:noteId/tags/:tagId
@@ -140,5 +141,5 @@ exports.notetagDELETE = async function (req, res) {
     const dbQuery = "DELETE FROM notetag WHERE note_id=$1 AND tag_id=$2;";
     const dbParams = [noteId, tagId];
     try { await db.query(dbQuery, dbParams) }
-    finally { res.send("Success") }
+    finally { return res.send({ result: "Success", message: "成功" }); }
 }
